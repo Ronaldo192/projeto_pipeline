@@ -56,7 +56,7 @@ def transform_orders_with_items(client) -> pl.DataFrame:
     items_agg = items.group_by("order_id").agg([
         pl.col("price").sum().alias("items_total"),
         pl.col("freight_value").sum().alias("freight_total"),
-        pl.len().alias("items_count"),
+        pl.col("order_item_id").count().alias("items_count"),
     ])
 
     # Agrega pagamentos por pedido
@@ -119,7 +119,7 @@ def transform_customers_with_metrics(client) -> pl.DataFrame:
         .filter(pl.col("order_status") == "delivered")
         .group_by("customer_id")
         .agg([
-            pl.len().alias("total_orders"),
+            pl.col("order_id").count().alias("total_orders"),
             pl.col("order_value").sum().alias("total_spent"),
             pl.col("order_value").mean().alias("avg_ticket"),
             pl.col("purchase_timestamp").max().alias("last_order_date"),
@@ -152,7 +152,7 @@ def transform_products_with_revenue(client) -> pl.DataFrame:
         delivered_items
         .group_by("product_id")
         .agg([
-            pl.len().alias("units_sold"),
+            pl.col("product_id").count().alias("units_sold"),
             pl.col("price").sum().alias("total_revenue"),
             pl.col("price").mean().alias("avg_price"),
         ])
