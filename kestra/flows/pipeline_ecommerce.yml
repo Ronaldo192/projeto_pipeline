@@ -2,81 +2,59 @@ id: ecommerce_pipeline
 namespace: data_engineering
 description: |
   Pipeline completo de e-commerce.
-
-  Fluxo:
-    1. Gera dados sintéticos (CSV)
-    2. Extrai para MinIO (landing)
-    3. Limpa e salva como Parquet (bronze)
-    4. Transforma com regras de negócio (silver)
-    5. Carrega no PostgreSQL (raw)
-    6. Executa modelos dbt (bronze → silver → gold)
-    7. Executa testes dbt
+  Fluxo: gera dados → MinIO landing → bronze → silver → PostgreSQL → dbt
 
 labels:
   env: development
-  domain: ecommerce
   team: data_engineering
-
-inputs:
-  - id: run_date
-    type: STRING
-    defaults: "{{ now() | dateAdd(-1, 'DAYS') | date('yyyy-MM-dd') }}"
-    description: "Data de referência do pipeline"
 
 variables:
   python_image: "pipeline-python:latest"
   workspace: "/workspace"
+  network: "projeto_pipeline_pipeline_net"
 
 tasks:
 
   # ─────────────────────────────────────────────────────────────
-  # Step 1: Gerar dados sintéticos
+  # Step 1: Gerar dados e enviar para MinIO landing (mesmo container)
   # ─────────────────────────────────────────────────────────────
-  - id: generate_data
+  - id: generate_and_extract
     type: io.kestra.plugin.scripts.python.Script
-    description: Gera CSVs sintéticos de e-commerce em data/raw/
+    description: Gera CSVs em data/raw/ e envia para MinIO landing no mesmo container
     containerImage: "{{ vars.python_image }}"
+    taskRunner:
+      type: io.kestra.plugin.scripts.runner.docker.Docker
+      networkMode: "{{ vars.network }}"
     env:
-      PYTHONPATH: "{{ vars.workspace }}"
-    script: |
-      import subprocess, sys
-      result = subprocess.run(
-          [sys.executable, "python/extract/generate_data.py"],
-          cwd="{{ vars.workspace }}",
-          capture_output=True,
-          text=True
-      )
-      print(result.stdout)
-      if result.returncode != 0:
-          print(result.stderr, file=sys.stderr)
-          sys.exit(result.returncode)
-
-  # ─────────────────────────────────────────────────────────────
-  # Step 2: Extract → MinIO landing
-  # ─────────────────────────────────────────────────────────────
-  - id: extract_to_landing
-    type: io.kestra.plugin.scripts.python.Script
-    description: Envia CSVs para MinIO bucket landing
-    containerImage: "{{ vars.python_image }}"
-    env:
-      POSTGRES_HOST: postgres
-      MINIO_ENDPOINT: minio:9000
-      MINIO_ACCESS_KEY: minioadmin
-      MINIO_SECRET_KEY: minioadmin123
+      MINIO_ENDPOINT: "minio:9000"
+      MINIO_ACCESS_KEY: "pipeline_user"
+      MINIO_SECRET_KEY: "pipeline_pass123"
       MINIO_SECURE: "false"
       PYTHONPATH: "{{ vars.workspace }}"
     script: |
       import subprocess, sys
-      result = subprocess.run(
+
+      print("=== Step 1/2: Gerando dados sintéticos ===")
+      r1 = subprocess.run(
+          [sys.executable, "python/extract/generate_data.py"],
+          cwd="{{ vars.workspace }}",
+          capture_output=True, text=True
+      )
+      print(r1.stdout)
+      if r1.returncode != 0:
+          print(r1.stderr, file=sys.stderr)
+          sys.exit(r1.returncode)
+
+      print("=== Step 2/2: Enviando para MinIO landing ===")
+      r2 = subprocess.run(
           [sys.executable, "python/extract/extract.py"],
           cwd="{{ vars.workspace }}",
-          capture_output=True,
-          text=True
+          capture_output=True, text=True
       )
-      print(result.stdout)
-      if result.returncode != 0:
-          print(result.stderr, file=sys.stderr)
-          sys.exit(result.returncode)
+      print(r2.stdout)
+      if r2.returncode != 0:
+          print(r2.stderr, file=sys.stderr)
+          sys.exit(r2.returncode)
 
   # ─────────────────────────────────────────────────────────────
   # Step 3: Clean → MinIO bronze
@@ -85,10 +63,13 @@ tasks:
     type: io.kestra.plugin.scripts.python.Script
     description: Limpa dados e salva Parquet no bucket bronze
     containerImage: "{{ vars.python_image }}"
+    taskRunner:
+      type: io.kestra.plugin.scripts.runner.docker.Docker
+      networkMode: "{{ vars.network }}"
     env:
-      MINIO_ENDPOINT: minio:9000
-      MINIO_ACCESS_KEY: minioadmin
-      MINIO_SECRET_KEY: minioadmin123
+      MINIO_ENDPOINT: "minio:9000"
+      MINIO_ACCESS_KEY: "pipeline_user"
+      MINIO_SECRET_KEY: "pipeline_pass123"
       MINIO_SECURE: "false"
       PYTHONPATH: "{{ vars.workspace }}"
     script: |
@@ -96,8 +77,7 @@ tasks:
       result = subprocess.run(
           [sys.executable, "python/transform/clean.py"],
           cwd="{{ vars.workspace }}",
-          capture_output=True,
-          text=True
+          capture_output=True, text=True
       )
       print(result.stdout)
       if result.returncode != 0:
@@ -111,10 +91,13 @@ tasks:
     type: io.kestra.plugin.scripts.python.Script
     description: Aplica regras de negócio e salva no bucket silver
     containerImage: "{{ vars.python_image }}"
+    taskRunner:
+      type: io.kestra.plugin.scripts.runner.docker.Docker
+      networkMode: "{{ vars.network }}"
     env:
-      MINIO_ENDPOINT: minio:9000
-      MINIO_ACCESS_KEY: minioadmin
-      MINIO_SECRET_KEY: minioadmin123
+      MINIO_ENDPOINT: "minio:9000"
+      MINIO_ACCESS_KEY: "pipeline_user"
+      MINIO_SECRET_KEY: "pipeline_pass123"
       MINIO_SECURE: "false"
       PYTHONPATH: "{{ vars.workspace }}"
     script: |
@@ -122,8 +105,7 @@ tasks:
       result = subprocess.run(
           [sys.executable, "python/transform/transform.py"],
           cwd="{{ vars.workspace }}",
-          capture_output=True,
-          text=True
+          capture_output=True, text=True
       )
       print(result.stdout)
       if result.returncode != 0:
@@ -137,15 +119,18 @@ tasks:
     type: io.kestra.plugin.scripts.python.Script
     description: Carrega dados no PostgreSQL schema raw
     containerImage: "{{ vars.python_image }}"
+    taskRunner:
+      type: io.kestra.plugin.scripts.runner.docker.Docker
+      networkMode: "{{ vars.network }}"
     env:
-      POSTGRES_HOST: postgres
+      POSTGRES_HOST: "postgres"
       POSTGRES_PORT: "5432"
-      POSTGRES_DB: pipeline
-      POSTGRES_USER: pipeline
-      POSTGRES_PASSWORD: pipeline123
-      MINIO_ENDPOINT: minio:9000
-      MINIO_ACCESS_KEY: minioadmin
-      MINIO_SECRET_KEY: minioadmin123
+      POSTGRES_DB: "pipeline"
+      POSTGRES_USER: "pipeline"
+      POSTGRES_PASSWORD: "pipeline123"
+      MINIO_ENDPOINT: "minio:9000"
+      MINIO_ACCESS_KEY: "pipeline_user"
+      MINIO_SECRET_KEY: "pipeline_pass123"
       MINIO_SECURE: "false"
       PYTHONPATH: "{{ vars.workspace }}"
     script: |
@@ -153,8 +138,7 @@ tasks:
       result = subprocess.run(
           [sys.executable, "python/load/load.py"],
           cwd="{{ vars.workspace }}",
-          capture_output=True,
-          text=True
+          capture_output=True, text=True
       )
       print(result.stdout)
       if result.returncode != 0:
@@ -166,18 +150,19 @@ tasks:
   # ─────────────────────────────────────────────────────────────
   - id: dbt_run
     type: io.kestra.plugin.scripts.shell.Commands
-    description: Executa os modelos dbt (raw → bronze → silver → gold)
+    description: Executa modelos dbt (raw → bronze → silver → gold)
     containerImage: "{{ vars.python_image }}"
+    taskRunner:
+      type: io.kestra.plugin.scripts.runner.docker.Docker
+      networkMode: "{{ vars.network }}"
     env:
-      DBT_POSTGRES_HOST: postgres
+      DBT_POSTGRES_HOST: "postgres"
       DBT_POSTGRES_PORT: "5432"
-      DBT_POSTGRES_DB: pipeline
-      DBT_POSTGRES_USER: pipeline
-      DBT_POSTGRES_PASSWORD: pipeline123
+      DBT_POSTGRES_DB: "pipeline"
+      DBT_POSTGRES_USER: "pipeline"
+      DBT_POSTGRES_PASSWORD: "pipeline123"
     commands:
-      - cd {{ vars.workspace }}/dbt
-      - dbt deps
-      - dbt run --project-dir . --profiles-dir .
+      - cd {{ vars.workspace }}/dbt && dbt deps && dbt run --project-dir . --profiles-dir .
 
   # ─────────────────────────────────────────────────────────────
   # Step 7: dbt test
@@ -186,19 +171,18 @@ tasks:
     type: io.kestra.plugin.scripts.shell.Commands
     description: Executa testes de qualidade dos modelos dbt
     containerImage: "{{ vars.python_image }}"
+    taskRunner:
+      type: io.kestra.plugin.scripts.runner.docker.Docker
+      networkMode: "{{ vars.network }}"
     env:
-      DBT_POSTGRES_HOST: postgres
+      DBT_POSTGRES_HOST: "postgres"
       DBT_POSTGRES_PORT: "5432"
-      DBT_POSTGRES_DB: pipeline
-      DBT_POSTGRES_USER: pipeline
-      DBT_POSTGRES_PASSWORD: pipeline123
+      DBT_POSTGRES_DB: "pipeline"
+      DBT_POSTGRES_USER: "pipeline"
+      DBT_POSTGRES_PASSWORD: "pipeline123"
     commands:
-      - cd {{ vars.workspace }}/dbt
-      - dbt test --project-dir . --profiles-dir .
+      - cd {{ vars.workspace }}/dbt && dbt test --project-dir . --profiles-dir .
 
-# ─────────────────────────────────────────────────────────────
-# Tratamento de erros
-# ─────────────────────────────────────────────────────────────
 errors:
   - id: log_failure
     type: io.kestra.plugin.core.log.Log
@@ -210,12 +194,8 @@ errors:
       Execution: {{ execution.id }}
       Erro: {{ errorLogs() }}
 
-# ─────────────────────────────────────────────────────────────
-# Agendamento (desativado por padrão)
-# ─────────────────────────────────────────────────────────────
 triggers:
   - id: schedule_daily
     type: io.kestra.plugin.core.trigger.Schedule
     cron: "0 6 * * *"
     disabled: true
-    description: "Executa diariamente às 6h (ativar em produção)"

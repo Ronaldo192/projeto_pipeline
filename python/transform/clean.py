@@ -58,13 +58,14 @@ def write_parquet_to_minio(client, df: pl.DataFrame, bucket: str, key: str):
 
 def clean_customers(df: pl.DataFrame) -> pl.DataFrame:
     original = len(df)
+    # Cast para String primeiro — Polars pode inferir colunas numéricas como i64 ao ler CSV
     df = (
         df.drop_nulls(subset=["customer_id"])
         .unique(subset=["customer_id"])
         .with_columns([
-            pl.col("city").str.strip_chars().str.to_titlecase(),
-            pl.col("state").str.strip_chars().str.to_uppercase(),
-            pl.col("zip_code_prefix").str.strip_chars().str.zfill(8),
+            pl.col("city").cast(pl.Utf8).str.strip_chars().str.to_titlecase(),
+            pl.col("state").cast(pl.Utf8).str.strip_chars().str.to_uppercase(),
+            pl.col("zip_code_prefix").cast(pl.Utf8).str.strip_chars().str.zfill(8),
         ])
         .filter(pl.col("state").is_in(VALID_STATES))
     )
@@ -79,11 +80,16 @@ def clean_orders(df: pl.DataFrame) -> pl.DataFrame:
 
     for col in date_cols:
         if col in df.columns:
-            df = df.with_columns(pl.col(col).str.to_datetime(strict=False))
+            df = df.with_columns(
+                pl.col(col).cast(pl.Utf8).str.to_datetime(strict=False)
+            )
 
     df = (
         df.drop_nulls(subset=["order_id", "customer_id", "purchase_timestamp"])
         .unique(subset=["order_id"])
+        .with_columns([
+            pl.col("order_status").cast(pl.Utf8),
+        ])
         .filter(pl.col("order_status").is_in(VALID_ORDER_STATUS))
     )
     log.info(f"  orders: {original} → {len(df)} linhas ({original - len(df)} removidas)")
@@ -125,6 +131,7 @@ def clean_order_payments(df: pl.DataFrame) -> pl.DataFrame:
     df = (
         df.drop_nulls(subset=["order_id"])
         .unique(subset=["order_id", "payment_sequential"])
+        .with_columns(pl.col("payment_type").cast(pl.Utf8))
         .filter(pl.col("payment_type").is_in(VALID_PAYMENT_TYPES))
         .with_columns([
             pl.col("payment_value").cast(pl.Float64, strict=False),
