@@ -1,0 +1,37 @@
+version: 2
+
+models:
+  - name: bronze_customers
+    description: "Clientes – limpeza mínima do raw"
+    columns:
+      - name: customer_id
+        tests: [unique, not_null]
+
+  - name: bronze_orders
+    description: "Pedidos a partir de {{ var('min_order_date') }}"
+    columns:
+      - name: order_id
+        tests: [unique, not_null]
+
+  - name: bronze_order_items
+    description: "Itens dos pedidos com total calculado"
+    columns:
+      - name: order_id
+        tests: [not_null]
+      - name: item_total
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: 0
+              inclusive: false
+
+  - name: bronze_order_payments
+    description: "Pagamentos com filtro de valor positivo"
+    columns:
+      - name: order_id
+        tests: [not_null]
+
+  - name: bronze_products
+    description: "Produtos com nome de categoria em inglês"
+    columns:
+      - name: product_id
+        tests: [unique, not_null]

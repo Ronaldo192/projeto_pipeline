@@ -1,0 +1,185 @@
+version: '3.8'
+
+services:
+
+  # ─────────────────────────────────────────────────────────────
+  # PostgreSQL – banco principal (schemas: raw, bronze, silver, gold)
+  #              + bancos auxiliares: kestra, metabase
+  # ─────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:15-alpine
+    container_name: pipeline_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: pipeline
+      POSTGRES_PASSWORD: pipeline123
+      POSTGRES_DB: pipeline
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - pipeline_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pipeline -d pipeline"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─────────────────────────────────────────────────────────────
+  # MinIO – object storage (data lake: landing, bronze, silver, gold)
+  # ─────────────────────────────────────────────────────────────
+  minio:
+    image: minio/minio:latest
+    container_name: pipeline_minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin123
+    ports:
+      - "9000:9000"   # API S3
+      - "9001:9001"   # Console web
+    volumes:
+      - minio_data:/data
+    networks:
+      - pipeline_net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ─────────────────────────────────────────────────────────────
+  # MinIO Init – cria os buckets após o MinIO subir
+  # ─────────────────────────────────────────────────────────────
+  minio-init:
+    image: minio/mc:latest
+    container_name: pipeline_minio_init
+    depends_on:
+      minio:
+        condition: service_healthy
+    networks:
+      - pipeline_net
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 minioadmin minioadmin123;
+      mc mb --ignore-existing local/landing;
+      mc mb --ignore-existing local/bronze;
+      mc mb --ignore-existing local/silver;
+      mc mb --ignore-existing local/gold;
+      echo 'Buckets criados com sucesso.';
+      "
+
+  # ─────────────────────────────────────────────────────────────
+  # Kestra – orquestrador de pipelines
+  # ─────────────────────────────────────────────────────────────
+  kestra:
+    image: kestra/kestra:latest
+    container_name: pipeline_kestra
+    restart: unless-stopped
+    command: server standalone
+    user: "root"
+    environment:
+      KESTRA_CONFIGURATION: |
+        datasources:
+          postgres:
+            url: jdbc:postgresql://postgres:5432/kestra
+            driverClassName: org.postgresql.Driver
+            username: pipeline
+            password: pipeline123
+        kestra:
+          server:
+            basic-auth:
+              enabled: false
+              username: admin@kestra.io
+              password: kestra
+          repository:
+            type: postgres
+          storage:
+            type: local
+            local:
+              base-path: /app/storage
+          queue:
+            type: postgres
+          tasks:
+            tmp-dir:
+              path: /tmp/kestra-wd/tmp
+          url: http://localhost:8080
+    ports:
+      - "8080:8080"   # UI + API
+      - "8081:8081"   # Management
+    volumes:
+      - kestra_data:/app/storage
+      - ./kestra/flows:/app/flows
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /tmp/kestra-wd:/tmp/kestra-wd
+      - .:/workspace
+    networks:
+      - pipeline_net
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # ─────────────────────────────────────────────────────────────
+  # Python Worker – executa os scripts ETL
+  # ─────────────────────────────────────────────────────────────
+  python-worker:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.python
+    container_name: pipeline_python
+    restart: unless-stopped
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: pipeline
+      POSTGRES_USER: pipeline
+      POSTGRES_PASSWORD: pipeline123
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin123
+      MINIO_SECURE: "false"
+    volumes:
+      - .:/workspace
+    working_dir: /workspace
+    command: ["tail", "-f", "/dev/null"]
+    networks:
+      - pipeline_net
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+
+  # ─────────────────────────────────────────────────────────────
+  # Metabase – visualização de dados (conecta ao schema gold)
+  # ─────────────────────────────────────────────────────────────
+  metabase:
+    image: metabase/metabase:v0.48.3
+    container_name: pipeline_metabase
+    restart: unless-stopped
+    environment:
+      MB_DB_TYPE: postgres
+      MB_DB_HOST: postgres
+      MB_DB_PORT: 5432
+      MB_DB_DBNAME: metabase
+      MB_DB_USER: pipeline
+      MB_DB_PASS: pipeline123
+    ports:
+      - "3000:3000"
+    networks:
+      - pipeline_net
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  minio_data:
+  kestra_data:
+
+networks:
+  pipeline_net:
+    driver: bridge

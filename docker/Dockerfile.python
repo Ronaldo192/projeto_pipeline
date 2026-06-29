@@ -1,0 +1,26 @@
+FROM python:3.11-slim
+
+LABEL maintainer="data-engineering-pipeline"
+LABEL description="Python worker com dependências ETL e dbt"
+
+# Dependências do sistema
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    libpq-dev \
+    curl \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /workspace
+
+# Instala dependências Python
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copia código (em desenvolvimento, usar volume mount)
+COPY . .
+
+ENV PYTHONPATH=/workspace
+ENV PYTHONUNBUFFERED=1
+
+CMD ["tail", "-f", "/dev/null"]

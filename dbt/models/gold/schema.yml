@@ -1,0 +1,39 @@
+version: 2
+
+models:
+  - name: gold_revenue_by_month
+    description: "Receita mensal com métricas de crescimento e SLA de entrega"
+    columns:
+      - name: purchase_month
+        tests: [unique, not_null]
+      - name: total_revenue
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: 0
+
+  - name: gold_revenue_by_category
+    description: "Receita por categoria de produto com market share"
+    columns:
+      - name: category
+        tests: [unique, not_null]
+
+  - name: gold_revenue_by_state
+    description: "Receita por estado brasileiro"
+    columns:
+      - name: state
+        tests: [unique, not_null]
+
+  - name: gold_top_products
+    description: "Top 100 produtos por receita e unidades vendidas"
+    columns:
+      - name: product_id
+        tests: [unique, not_null]
+
+  - name: gold_top_customers
+    description: "Top 100 clientes por valor total gasto"
+    columns:
+      - name: customer_id
+        tests: [unique, not_null]
+
+  - name: gold_kpis
+    description: "KPIs consolidados para o dashboard executivo"

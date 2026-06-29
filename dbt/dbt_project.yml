@@ -1,0 +1,37 @@
+name: 'ecommerce_pipeline'
+version: '1.0.0'
+config-version: 2
+
+profile: 'ecommerce_pipeline'
+
+model-paths: ["models"]
+analysis-paths: ["analyses"]
+test-paths: ["tests"]
+seed-paths: ["seeds"]
+macro-paths: ["macros"]
+snapshot-paths: ["snapshots"]
+
+clean-targets:
+  - "target"
+  - "dbt_packages"
+
+models:
+  ecommerce_pipeline:
+    bronze:
+      +materialized: table
+      +schema: bronze
+      +tags: ["bronze", "raw_layer"]
+
+    silver:
+      +materialized: table
+      +schema: silver
+      +tags: ["silver", "business_layer"]
+
+    gold:
+      +materialized: table
+      +schema: gold
+      +tags: ["gold", "reporting_layer"]
+
+vars:
+  min_order_date: '2022-01-01'
+  delivery_sla_days: 30

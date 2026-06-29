@@ -1,0 +1,8 @@
+# Normaliza line endings para LF no repositório
+* text=auto eol=lf
+
+# Arquivos binários
+*.parquet binary
+*.csv     text eol=lf
+*.png     binary
+*.jpg     binary

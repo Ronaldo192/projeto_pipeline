@@ -1,0 +1,30 @@
+version: 2
+
+models:
+  - name: silver_customers
+    description: "Clientes enriquecidos com métricas de comportamento e segmento RFM"
+    columns:
+      - name: customer_id
+        tests: [unique, not_null]
+      - name: customer_segment
+        tests:
+          - accepted_values:
+              values: ['high_value', 'medium_value', 'low_value', 'no_purchase']
+
+  - name: silver_orders
+    description: "Pedidos enriquecidos com totais, SLA de entrega e forma de pagamento"
+    columns:
+      - name: order_id
+        tests: [unique, not_null]
+      - name: order_status
+        tests:
+          - accepted_values:
+              values: ['delivered', 'shipped', 'canceled', 'invoiced', 'processing', 'approved']
+
+  - name: silver_order_items
+    description: "Itens com contexto do pedido e dados do produto"
+    columns:
+      - name: order_id
+        tests: [not_null]
+      - name: product_id
+        tests: [not_null]
