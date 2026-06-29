@@ -85,8 +85,8 @@ CREATE TABLE IF NOT EXISTS raw.order_payments (
 );
 
 CREATE TABLE IF NOT EXISTS raw.product_categories (
-    category_name           VARCHAR(100) PRIMARY KEY,
-    category_name_english   VARCHAR(100)
+    product_category_name           VARCHAR(100) PRIMARY KEY,
+    product_category_name_english   VARCHAR(100)
 );
 
 -- ============================================================
